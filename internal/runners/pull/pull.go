@@ -1,21 +1,17 @@
 package pull
 
 import (
-	"os"
-	"path"
+	"github.com/go-openapi/strfmt"
 
 	"github.com/ActiveState/cli/internal/config"
-	"github.com/ActiveState/cli/internal/constants"
 	"github.com/ActiveState/cli/internal/errs"
-	"github.com/ActiveState/cli/internal/hail"
 	"github.com/ActiveState/cli/internal/locale"
-	"github.com/ActiveState/cli/internal/logging"
 	"github.com/ActiveState/cli/internal/output"
 	"github.com/ActiveState/cli/internal/primer"
 	"github.com/ActiveState/cli/internal/prompt"
+	"github.com/ActiveState/cli/internal/runbits"
 	"github.com/ActiveState/cli/pkg/platform/model"
 	"github.com/ActiveState/cli/pkg/project"
-	"github.com/go-openapi/strfmt"
 )
 
 type Pull struct {
@@ -71,6 +67,10 @@ func (p *Pull) Run(params *PullParams) error {
 		return locale.NewInputError("err_pull_headless", "You must first create a project. Please visit {{.V0}} to create your project.", p.project.URL())
 	}
 
+	if !p.project.IsHeadless() && p.project.BranchName() == "" {
+		return locale.NewError("err_pull_branch", "Your [NOTICE]activestate.yaml[/RESET] project field does not contain a branch. Please ensure you are using the latest version of the State Tool by running [ACTIONABLE]`state update`[/RESET] and then trying again.")
+	}
+
 	// Determine the project to pull from
 	target, err := targetProject(p.project, params.SetProject)
 	if err != nil {
@@ -113,17 +113,14 @@ func (p *Pull) Run(params *PullParams) error {
 		})
 	}
 
-	actID := os.Getenv(constants.ActivatedStateIDEnvVarName)
-	if actID == "" {
-		logging.Debug("Not in an activated environment, so no need to reactivate")
-		return nil
+	revertCommit, err := model.GetRevertCommit(p.project.CommitUUID(), *target.CommitID)
+	if err != nil {
+		return errs.Wrap(err, "Could not get revert commit to check if changes were indeed made")
 	}
 
-	fname := path.Join(p.cfg.ConfigPath(), constants.UpdateHailFileName)
-	// must happen last in this function scope (defer if needed)
-	if err := hail.Send(fname, []byte(actID)); err != nil {
-		logging.Error("failed to send hail via %q: %s", fname, err)
-		return locale.WrapError(err, "err_pull_hail", "Could not re-activate your project, please exit and re-activate manually by running 'state activate' again.")
+	err = runbits.RefreshRuntime(p.out, p.project, p.cfg.CachePath(), *target.CommitID, len(revertCommit.Changeset) > 0)
+	if err != nil {
+		return locale.WrapError(err, "err_pull_refresh", "Could not refresh runtime after pull")
 	}
 
 	return nil
@@ -140,11 +137,17 @@ func targetProject(prj *project.Project, overwrite string) (*project.Namespaced,
 	}
 
 	// Retrieve commit ID to set the project to (if unset)
-	if ns.CommitID == nil || *ns.CommitID == "" || prj.BranchName() != "" {
-		var err error
-		ns.CommitID, err = model.LatestCommitIDByBranch(ns.Owner, ns.Project, prj.BranchName())
+	if overwrite != "" {
+		branch, err := model.DefaultBranchForProjectName(ns.Owner, ns.Project)
 		if err != nil {
 			return nil, locale.WrapError(err, "err_pull_commit", "Could not retrieve the latest commit for your project.")
+		}
+		ns.CommitID = branch.CommitID
+	} else {
+		var err error
+		ns.CommitID, err = model.BranchCommitID(ns.Owner, ns.Project, prj.BranchName())
+		if err != nil {
+			return nil, locale.WrapError(err, "err_pull_commit_branch", "Could not retrieve the latest commit for your project and branch.")
 		}
 	}
 

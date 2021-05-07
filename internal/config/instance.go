@@ -8,33 +8,43 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/shibukawa/configdir"
-	"github.com/spf13/viper"
+	"github.com/spf13/cast"
+	"gopkg.in/yaml.v2"
 
 	"github.com/ActiveState/cli/internal/condition"
 	C "github.com/ActiveState/cli/internal/constants"
 	"github.com/ActiveState/cli/internal/errs"
+	"github.com/ActiveState/cli/internal/osutils/lockfile"
 )
 
 var defaultConfig *Instance
 
+const ConfigKeyShell = "shell"
+const ConfigKeyTrayPid = "tray-pid"
+
 // Instance holds our main config logic
 type Instance struct {
-	viper         *viper.Viper
 	configDir     *configdir.Config
 	cacheDir      *configdir.Config
+	configFile    string
+	lockFile      string
 	localPath     string
 	installSource string
 	noSave        bool
+	rwLock        *sync.RWMutex
+	data          map[string]interface{}
 }
 
 func new(localPath string) (*Instance, error) {
 	instance := &Instance{
-		viper:     viper.New(),
 		localPath: localPath,
+		rwLock:    &sync.RWMutex{},
+		data:      make(map[string]interface{}),
 	}
 
 	err := instance.Reload()
@@ -78,9 +88,9 @@ func configPathInTest() (string, error) {
 
 // New creates a new config instance
 func New() (*Instance, error) {
-	localPath := os.Getenv(C.ConfigEnvVarName)
+	localPath, envSet := os.LookupEnv(C.ConfigEnvVarName)
 
-	if condition.InTest() {
+	if !envSet && condition.InTest() {
 		var err error
 		localPath, err = configPathInTest()
 		if err != nil {
@@ -110,47 +120,73 @@ func Get() (*Instance, error) {
 }
 
 // Set sets a value at the given key
-func (i *Instance) Set(key string, value interface{}) {
-	i.viper.Set(key, value)
+func (i *Instance) Set(key string, value interface{}) error {
+	i.rwLock.Lock()
+	defer i.rwLock.Unlock()
+
+	err := i.ReadInConfig()
+	if err != nil {
+		return err
+	}
+
+	i.data[strings.ToLower(key)] = value
+
+	err = i.save()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (i *Instance) get(key string) interface{} {
+	i.rwLock.RLock()
+	defer i.rwLock.RUnlock()
+	return i.data[strings.ToLower(key)]
 }
 
 // GetString retrieves a string for a given key
 func (i *Instance) GetString(key string) string {
-	return i.viper.GetString(key)
+	return cast.ToString(i.get(key))
 }
 
+// GetInt retrieves an int for a given key
+func (i *Instance) GetInt(key string) int {
+	return cast.ToInt(i.get(key))
+}
+
+// AllKeys returns all of the curent config keys
 func (i *Instance) AllKeys() []string {
-	return i.viper.AllKeys()
+	var keys []string
+	for k := range i.data {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // GetStringMapStringSlice retrieves a map of string slices for a given key
 func (i *Instance) GetStringMapStringSlice(key string) map[string][]string {
-	return i.viper.GetStringMapStringSlice(key)
-}
-
-// SetDefault sets the default value for a given key
-func (i *Instance) SetDefault(key string, value interface{}) {
-	i.viper.SetDefault(key, value)
+	return cast.ToStringMapStringSlice(i.get(key))
 }
 
 // GetBool retrieves a boolean value for a given key
 func (i *Instance) GetBool(key string) bool {
-	return i.viper.GetBool(key)
+	return cast.ToBool(i.get(key))
 }
 
 // GetStringSlice retrieves a slice of strings for a given key
 func (i *Instance) GetStringSlice(key string) []string {
-	return i.viper.GetStringSlice(key)
+	return cast.ToStringSlice(i.get(key))
 }
 
 // GetTime retrieves a time instance for a given key
 func (i *Instance) GetTime(key string) time.Time {
-	return i.viper.GetTime(key)
+	return cast.ToTime(i.get(key))
 }
 
 // GetStringMap retrieves a map of strings to values for a given key
 func (i *Instance) GetStringMap(key string) map[string]interface{} {
-	return i.viper.GetStringMap(key)
+	return cast.ToStringMap(i.get(key))
 }
 
 // Type returns the config filetype
@@ -195,35 +231,66 @@ func (i *Instance) InstallSource() string {
 
 // ReadInConfig reads in config from the config file
 func (i *Instance) ReadInConfig() error {
-	// Prepare viper, which is a library that automates configuration
-	// management between files, env vars and the CLI
-	i.viper.SetConfigName(i.Name())
-	i.viper.SetConfigType(i.Type())
-	i.viper.AddConfigPath(i.configDir.Path)
-	i.viper.AddConfigPath(".")
-
-	if err := i.viper.ReadInConfig(); err != nil {
-		return errs.Wrap(err, "Cannot read config.")
+	pl, err := lockfile.NewPidLock(i.getLockFile())
+	if err != nil {
+		return errs.Wrap(err, "Could not create lock file for updating config")
 	}
+	defer pl.Close()
+
+	err = pl.WaitForLock(5 * time.Second)
+	if err != nil {
+		return errs.Wrap(err, "Unable to acquire lock")
+	}
+
+	configFile, err := i.getConfigFile()
+	if err != nil {
+		return errs.Wrap(err, "Could not find config file")
+	}
+
+	configData, err := ioutil.ReadFile(configFile)
+	if err != nil {
+		return errs.Wrap(err, "Could not read config file")
+	}
+
+	data := make(map[string]interface{})
+	err = yaml.Unmarshal(configData, data)
+	if err != nil {
+		return errs.Wrap(err, "Could not unmarshall config data")
+	}
+
+	i.data = data
 	return nil
 }
 
-// Save saves the config file
-func (i *Instance) Save() error {
-	if i.noSave {
-		return nil
+func (i *Instance) save() error {
+	pl, err := lockfile.NewPidLock(i.getLockFile())
+	if err != nil {
+		return errs.Wrap(err, "Could not create lock file for updating config")
 	}
+	defer pl.Close()
 
-	if err := i.viper.MergeInConfig(); err != nil {
+	err = pl.WaitForLock(5 * time.Second)
+	if err != nil {
 		return err
 	}
 
-	return i.viper.WriteConfig()
-}
+	f, err := os.Create(i.configFile)
+	if err != nil {
+		return errs.Wrap(err, "Could not create/open config file")
+	}
+	defer f.Close()
 
-// SkipSave forces the save behavior to have no effect.
-func (i *Instance) SkipSave(b bool) {
-	i.noSave = b
+	data, err := yaml.Marshal(i.data)
+	if err != nil {
+		return errs.Wrap(err, "Could not marshal config data")
+	}
+
+	_, err = f.Write(data)
+	if err != nil {
+		return errs.Wrap(err, "Could not write config file")
+	}
+
+	return nil
 }
 
 func (i *Instance) ensureConfigExists() error {
@@ -289,6 +356,22 @@ func (i *Instance) ensureCacheExists() error {
 		return errs.Wrap(err, "Cannot create cache directory")
 	}
 	return nil
+}
+
+func (i *Instance) getLockFile() string {
+	if i.lockFile == "" {
+		i.lockFile = filepath.Join(i.configDir.Path, "config.lock")
+	}
+
+	return i.lockFile
+}
+
+func (i *Instance) getConfigFile() (string, error) {
+	if i.configFile == "" {
+		i.configFile = filepath.Join(i.configDir.Path, C.InternalConfigFileName)
+	}
+
+	return i.configFile, nil
 }
 
 // tempDir returns a temp directory path at the topmost directory possible

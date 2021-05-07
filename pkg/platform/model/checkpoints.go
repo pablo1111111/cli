@@ -15,7 +15,6 @@ import (
 	"github.com/ActiveState/cli/pkg/platform/api/graphql/model"
 	"github.com/ActiveState/cli/pkg/platform/api/graphql/request"
 	"github.com/ActiveState/cli/pkg/platform/api/inventory/inventory_models"
-	"github.com/ActiveState/cli/pkg/platform/api/mono/mono_models"
 )
 
 var (
@@ -49,30 +48,6 @@ func GetRequirement(commitID strfmt.UUID, namespace, requirement string) (*model
 	return nil, nil
 }
 
-// FetchLanguagesForProject fetches a list of language names for the given project
-func FetchLanguagesForProject(orgName string, projectName string) ([]Language, error) {
-	platProject, err := FetchProjectByName(orgName, projectName)
-	if err != nil {
-		return nil, err
-	}
-
-	branch, err := DefaultBranchForProject(platProject)
-	if err != nil {
-		return nil, err
-	}
-
-	return FetchLanguagesForBranch(branch)
-}
-
-// FetchLanguagesForBranch fetches a list of language names for the given branch
-func FetchLanguagesForBranch(branch *mono_models.Branch) ([]Language, error) {
-	if branch.CommitID == nil {
-		return nil, locale.NewError("err_no_commit")
-	}
-
-	return FetchLanguagesForCommit(*branch.CommitID)
-}
-
 // FetchLanguagesForCommit fetches a list of language names for the given commit
 func FetchLanguagesForCommit(commitID strfmt.UUID) ([]Language, error) {
 	checkpoint, _, err := FetchCheckpointForCommit(commitID)
@@ -99,7 +74,7 @@ func FetchCheckpointForCommit(commitID strfmt.UUID) (Checkpoint, strfmt.DateTime
 
 	request := request.CheckpointByCommit(commitID)
 
-	gql := graphql.Get()
+	gql := graphql.New()
 	response := model.Checkpoint{}
 	err := gql.Run(request, &response)
 	if err != nil {

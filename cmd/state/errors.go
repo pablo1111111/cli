@@ -83,17 +83,19 @@ func unwrapError(err error) (int, error) {
 
 	_, hasMarshaller := err.(output.Marshaller)
 
-	// Log error if this isn't a user input error
-	if !locale.IsInputError(err) {
-		logging.Error("Returning error:\n%s\nCreated at:\n%s", errs.Join(err, "\n").Error(), stack)
-	}
-
 	// unwrap exit code before we remove un-localized wrapped errors from err variable
 	code := errs.UnwrapExitCode(err)
 
 	if isSilent(err) {
 		logging.Debug("Suppressing silent failure: %v", err.Error())
 		return code, nil
+	}
+
+	// Log error if this isn't a user input error
+	if !locale.IsInputError(err) {
+		logging.Error("Returning error:\n%s\nCreated at:\n%s", errs.Join(err, "\n").Error(), stack)
+	} else {
+		logging.Debug("Returning input error:\n%s\nCreated at:\n%s", errs.Join(err, "\n").Error(), stack)
 	}
 
 	if !locale.HasError(err) && isErrs && !hasMarshaller {
@@ -126,10 +128,15 @@ Your error log is located at: %s`, logging.FilePath()))
 	}
 }
 
+type SilencedError struct{ error }
+
+func (s *SilencedError) Unwrap() error { return s.error }
+
+func (s *SilencedError) IsSilent() bool { return true }
+
 func isSilent(err error) bool {
 	var silentErr interface {
 		IsSilent() bool
 	}
 	return errors.As(err, &silentErr) && silentErr.IsSilent()
 }
-

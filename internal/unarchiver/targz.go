@@ -22,12 +22,16 @@ var _ SingleUnarchiver = &TarGzArchive{}
 // TarGzArchive is an extension of an TarGz archiver implementing an unarchive method with
 // progress feedback
 type TarGzArchive struct {
-	archiver.TarGz
+	*archiver.TarGz
 }
 
 // NewTarGz initializes a new TarGzArchiver
 func NewTarGz() Unarchiver {
-	return Unarchiver{&TarGzArchive{*archiver.DefaultTarGz}, func(_ string, _ int64, _ bool) {}}
+	return Unarchiver{&TarGzArchive{archiver.NewTarGz()}, func(_ string, _ int64, _ bool) {}}
+}
+
+func (ar *TarGzArchive) Ext() string {
+	return ".tar.gz"
 }
 
 // GetExtractedSize returns the size of the extracted summed up files in the archive
@@ -69,27 +73,21 @@ func (ar *TarGzArchive) ExtractNext(destination string) (f archiver.File, err er
 	if !ok {
 		return f, fmt.Errorf("expected header to be *tar.Header but was %T", f.Header)
 	}
-	return f, ar.untarFile(f, destination, header.Name)
+	return f, untarSingleFile(header, f, destination, header.Name, ar.OverwriteExisting)
 }
 
-func (ar *TarGzArchive) untarFile(f archiver.File, destination string, relTo string) error {
-
+func untarSingleFile(hdr *tar.Header, data io.Reader, destination, relTo string, overwriteExisting bool) error {
 	to := filepath.Join(destination, relTo)
 	// do not overwrite existing files, if configured
-	if !f.IsDir() && !ar.OverwriteExisting && fileExists(to) {
+	if !hdr.FileInfo().IsDir() && !overwriteExisting && fileExists(to) {
 		return fmt.Errorf("file already exists: %s", to)
-	}
-
-	hdr, ok := f.Header.(*tar.Header)
-	if !ok {
-		return fmt.Errorf("expected header to be *tar.Header but was %T", f.Header)
 	}
 
 	switch hdr.Typeflag {
 	case tar.TypeDir:
 		return mkdir(to)
 	case tar.TypeReg, tar.TypeRegA, tar.TypeChar, tar.TypeBlock, tar.TypeFifo:
-		return writeNewFile(to, f, f.Mode())
+		return writeNewFile(to, data, hdr.FileInfo().Mode())
 	case tar.TypeSymlink:
 		return writeNewSymbolicLink(to, hdr.Linkname)
 	case tar.TypeLink:

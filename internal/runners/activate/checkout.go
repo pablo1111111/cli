@@ -3,7 +3,10 @@ package activate
 import (
 	"path/filepath"
 
+	"github.com/go-openapi/strfmt"
+
 	"github.com/ActiveState/cli/internal/constants"
+	"github.com/ActiveState/cli/internal/errs"
 	"github.com/ActiveState/cli/internal/fileutils"
 	"github.com/ActiveState/cli/internal/language"
 	"github.com/ActiveState/cli/internal/locale"
@@ -36,6 +39,14 @@ func (r *Checkout) Run(ns *project.Namespaced, branchName, targetPath string) er
 		return err
 	}
 
+	if branchName == "" {
+		branch, err := model.DefaultBranchForProject(pj)
+		if err != nil {
+			return errs.Wrap(err, "Could not grab branch for project")
+		}
+		branchName = branch.Label
+	}
+
 	commitID := ns.CommitID
 	if commitID == nil {
 		branch, err := model.BranchForProjectByName(pj, branchName)
@@ -45,15 +56,19 @@ func (r *Checkout) Run(ns *project.Namespaced, branchName, targetPath string) er
 		commitID = branch.CommitID
 	}
 
+	if commitID == nil {
+		return errs.New("commitID is nil")
+	}
+
 	// Clone the related repo, if it is defined
-	if pj.RepoURL != nil {
+	if pj.RepoURL != nil && *pj.RepoURL != "" {
 		err := r.repo.CloneProject(ns.Owner, ns.Project, targetPath, r.Outputer)
 		if err != nil {
 			return err
 		}
 	}
 
-	language, err := getLanguage(ns.Owner, ns.Project)
+	language, err := getLanguage(*commitID)
 	if err != nil {
 		return err
 	}
@@ -62,11 +77,12 @@ func (r *Checkout) Run(ns *project.Namespaced, branchName, targetPath string) er
 	configFile := filepath.Join(targetPath, constants.ConfigFileName)
 	if !fileutils.FileExists(configFile) {
 		err = projectfile.Create(&projectfile.CreateParams{
-			Owner:     ns.Owner,
-			Project:   ns.Project,
-			CommitID:  commitID,
-			Directory: targetPath,
-			Language:  language,
+			Owner:      ns.Owner,
+			Project:    ns.Project,
+			CommitID:   commitID,
+			BranchName: branchName,
+			Directory:  targetPath,
+			Language:   language,
 		})
 		if err != nil {
 			return err
@@ -76,8 +92,8 @@ func (r *Checkout) Run(ns *project.Namespaced, branchName, targetPath string) er
 	return nil
 }
 
-func getLanguage(owner, project string) (string, error) {
-	modelLanguage, err := model.DefaultLanguageForProject(owner, project)
+func getLanguage(commitID strfmt.UUID) (string, error) {
+	modelLanguage, err := model.LanguageByCommit(commitID)
 	if err != nil {
 		return "", err
 	}

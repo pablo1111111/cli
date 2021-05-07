@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ActiveState/cli/internal/errs"
+	"github.com/ActiveState/cli/internal/exeutils"
 	"github.com/thoas/go-funk"
 
 	"github.com/ActiveState/cli/internal/fileutils"
@@ -113,11 +115,20 @@ func NewEnvironmentDefinition(fp string) (*EnvironmentDefinition, error) {
 
 // WriteFile marshals an environment definition to a file
 func (ed *EnvironmentDefinition) WriteFile(filepath string) error {
-	blob, err := json.MarshalIndent(ed, "", "  ")
+	blob, err := ed.Marshal()
 	if err != nil {
 		return err
 	}
 	return ioutil.WriteFile(filepath, blob, 0666)
+}
+
+// WriteFile marshals an environment definition to a file
+func (ed *EnvironmentDefinition) Marshal() ([]byte, error) {
+	blob, err := json.MarshalIndent(ed, "", "  ")
+	if err != nil {
+		return []byte(""), err
+	}
+	return blob, nil
 }
 
 // ExpandVariables expands substitution strings specified in the environment variable values.
@@ -323,7 +334,10 @@ func (ed *EnvironmentDefinition) GetEnvBasedOn(envLookup func(string) (string, b
 				}
 			}
 		}
-		res[pev.Name] = pev.ValueString()
+		// only add environment variable if at least one value is set (This allows us to remove variables from the environment.)
+		if len(ev.Values) > 0 {
+			res[pev.Name] = pev.ValueString()
+		}
 	}
 	return res, nil
 }
@@ -343,6 +357,31 @@ func (ed *EnvironmentDefinition) GetEnv(inherit bool) map[string]string {
 		panic(fmt.Sprintf("Could not inherit OS environment variable: %v", err))
 	}
 	return res
+}
+
+type ExecutablePaths []string
+
+func (ed *EnvironmentDefinition) ExecutablePaths() (ExecutablePaths, error) {
+	env := ed.GetEnv(false)
+
+	// Retrieve artifact binary directory
+	var bins []string
+	if p, ok := env["PATH"]; ok {
+		bins = strings.Split(p, string(os.PathListSeparator))
+	}
+
+	exes, err := exeutils.Executables(bins)
+	if err != nil {
+		return nil, errs.Wrap(err, "Could not detect executables")
+	}
+
+	// Remove duplicate executables as per PATH and PATHEXT
+	exes, err = exeutils.UniqueExes(exes, os.Getenv("PATHEXT"))
+	if err != nil {
+		return nil, errs.Wrap(err, "Could not detect unique executables, make sure your PATH and PATHEXT environment variables are properly configured.")
+	}
+
+	return exes, nil
 }
 
 // FindBinPathFor returns the PATH directory in which the executable can be found.

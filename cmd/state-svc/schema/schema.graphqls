@@ -1,0 +1,28 @@
+type Version {
+  state: StateVersion!
+}
+
+type StateVersion {
+  license: String!
+  version: String!
+  branch: String!
+  revision: String!
+  date: String!
+}
+
+type DeferredUpdate {
+  channel: String!
+  version: String!
+  logfile: String!
+}
+
+type Project {
+  namespace: String!
+  locations: [String!]!
+}
+
+type Query {
+  version: Version
+  update(channel: String, version: String): DeferredUpdate
+  projects: [Project]!
+}

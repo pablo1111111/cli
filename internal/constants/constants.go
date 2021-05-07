@@ -27,8 +27,8 @@ const ConfigEnvVarName = "ACTIVESTATE_CLI_CONFIGDIR"
 // CacheEnvVarName is the env var used to override the cache dir that the State Tool uses
 const CacheEnvVarName = "ACTIVESTATE_CLI_CACHEDIR"
 
-// ShimEnvVarName is the env var used to find out if we are shimming recursively
-const ShimEnvVarName = "ACTIVESTATE_CLI_SHIMMED_COMMAND"
+// ExecEnvVarName is the env var used to find out if we are shimming recursively
+const ExecEnvVarName = "ACTIVESTATE_CLI_SHIMMED_COMMAND"
 
 // DisableUpdates is the env var used to disable auto update
 const DisableUpdates = "ACTIVESTATE_CLI_DISABLE_UPDATES"
@@ -82,7 +82,7 @@ const CPUProfileEnvVarName = "ACTIVESTATE_PROFILE_CPU"
 const NonInteractive = "ACTIVESTATE_NONINTERACTIVE"
 
 // APIUpdateURL is the URL for our update server
-const APIUpdateURL = "https://s3.ca-central-1.amazonaws.com/cli-update/update/"
+const APIUpdateURL = "https://state-tool.s3.amazonaws.com/update/"
 
 // APIArtifactURL is the URL for downloading artifacts
 const APIArtifactURL = "https://s3.ca-central-1.amazonaws.com/cli-artifacts/"
@@ -95,6 +95,9 @@ const ArtifactArchiveName = "artifact.tar.gz"
 
 // ArtifactCacheFileName is the standardized name of an artifact cache file
 const ArtifactCacheFileName = "artifact_cache.json"
+
+// ArtifactMetaDir is the directory in which we store meta information about artifacts
+const ArtifactMetaDir = "artifacts"
 
 // DefaultNamespaceDomain is the domain used when no namespace is given and one has to be constructed
 const DefaultNamespaceDomain = "github.com"
@@ -149,11 +152,14 @@ const InventoryAPIPath = "/sv/inventory-api-v1"
 // GraphqlAPIPath is the path used for the platform graphql api
 const GraphqlAPIPath = "/graphql/v1/graphql"
 
-// RequirementsImportAPIPath is the path used for the requiremments import api
+// MediatorAPIPath is the path used for the platform mediator api
+const MediatorAPIPath = "/sv/mediator/api"
+
+// RequirementsImportAPIPath is the path used for the requirements import api
 const RequirementsImportAPIPath = "/sv/reqsvc/reqs"
 
 // DeprecationInfoURL is the URL we check against to see what versions are deprecated
-const DeprecationInfoURL = "https://s3.ca-central-1.amazonaws.com/cli-update/deprecation.json"
+const DeprecationInfoURL = "https://state-tool.s3.amazonaws.com/deprecation.json"
 
 // DateFormatUser is the date format we use when communicating with the end-user
 const DateFormatUser = "January 02, 2006"
@@ -170,6 +176,15 @@ const PlatformSignupURL = "https://platform.activestate.com" + "/create-account"
 // DocumentationURL is the url for the state tool documentation
 const DocumentationURL = "http://docs.activestate.com/platform/state/"
 
+// DocumentationURLHeadless is the documentation URL for headless state docs
+const DocumentationURLHeadless = DocumentationURL + "advanced-topics/detached/"
+
+// ActiveStateBlogURL is the URL for the ActiveState Blog
+const ActiveStateBlogURL = "https://www.activestate.com/blog/"
+
+// ActiveStateSupportURL is the URL for the AciveState support page
+const ActiveStateSupportURL = "https://www.activestate.com/support/"
+
 // BugTrackerURL is the URL of our bug tracker
 const BugTrackerURL = "https://github.com/ActiveState/state-tool/issues"
 
@@ -179,8 +194,18 @@ const UserAgentTemplate = "{{.UserAgent}} ({{.OS}}; {{.OSVersion}}; {{.Architect
 // PlatformURL is the base domain for the production platform
 const PlatformURL = "platform.activestate.com"
 
-// RollbarToken is the token used to talk to rollbar
-const RollbarToken = "cc836c27caf344f7befab5b707ed7d4e"
+// StateToolRollbarToken is the token used by the State Tool to talk to rollbar
+const StateToolRollbarToken = "cc836c27caf344f7befab5b707ed7d4e"
+
+// StateTrayRollbarToken is the token used by the State Tray to talk to rollbar
+const StateTrayRollbarToken = "d786a99eabf24617b82c44dfab19d907"
+
+// StateServiceRollbarToken is the token used by the State Service to talk to rollbar
+const StateServiceRollbarToken = "8591fd01f23a41acb14d478c85638d92"
+
+// StateInstallerRollbarToken is the token used by the State Installer to talk to rollbar
+// Todo It is currently the same as the State Tool's
+const StateInstallerRollbarToken = "cc836c27caf344f7befab5b707ed7d4e"
 
 // {OS}Bit{Depth}UUID constants are the UUIDs associated with the relevant OSes
 // in the platform DB.
@@ -198,21 +223,26 @@ const ActivePythonDistsDir = "python"
 const RuntimeInstallDirs = "INSTALLDIR,perl"
 
 // RuntimeMetaFile is the json file that holds meta information about our runtime
-const RuntimeMetaFile = "support/metadata.json"
+const RuntimeMetaFile = "metadata.json"
 
 // RuntimeDefinitionFilename is the filename for runtime meta data bundled with artifacts, if they are built by the alternative builder
 const RuntimeDefinitionFilename = "runtime.json"
 
 // LocalRuntimeEnvironmentDirectory is the directory (relative to the installation of a runtime build) where runtime definition files are stored
-const LocalRuntimeEnvironmentDirectory = "_runtime_env"
+const LocalRuntimeEnvironmentDirectory = "_runtime_store"
+
+// LocalRuntimeTempDirectory is the directory (relative to the installation of a runtime build) where temp files are stored
+const LocalRuntimeTempDirectory = "_runtime_temp"
 
 // RuntimeInstallationCompleteMarker is created after all artifacts have been installed
 // Check for existence of this file to ensure that the installation has not been interrupted prematurely.
-const RuntimeInstallationCompleteMarker = "support/completed"
+const RuntimeInstallationCompleteMarker = "completed"
 
-// RuntimeBuildEngineStore is created after all artifacts have been installed
-// Check for existence of this file to ensure that the installation has not been interrupted prematurely.
-const RuntimeBuildEngineStore = "support/build_engine"
+// RuntimeBuildEngineStore contains the name of the build engine that was used to create this runtime
+const RuntimeBuildEngineStore = "build_engine"
+
+// RuntimeRecipeStore contains a serialization of the recipe used to create this build
+const RuntimeRecipeStore = "recipe"
 
 // StateToolMarketingPage links to the marketing page for the state tool
 const StateToolMarketingPage = "https://www.activestate.com/products/platform/state-tool/"
@@ -238,8 +268,39 @@ const RCAppendDefaultStartLine = "-- START ACTIVESTATE DEFAULT RUNTIME ENVIRONME
 // RCAppendDefaultStopLine is the end line used to denote our default environment config in RC files
 const RCAppendDefaultStopLine = "-- STOP ACTIVESTATE DEFAULT RUNTIME ENVIRONMENT"
 
+// RCAppendInstallStartLine is the start line used to denote our default environment config in RC files
+const RCAppendInstallStartLine = "-- START ACTIVESTATE INSTALLATION"
+
+// RCAppendInstallStopLine is the end line used to denote our default environment config in RC files
+const RCAppendInstallStopLine = "-- STOP ACTIVESTATE INSTALLATION"
+
 // ForumsURL is the URL to the state tool forums
 const ForumsURL = "https://community.activestate.com/c/state-tool/"
 
 // GlobalDefaultPrefname is the pref that holds the path to the globally defaulted project
 const GlobalDefaultPrefname = "default_project_path"
+
+// DefaultBranchName is the default branch name used on platform projects
+const DefaultBranchName = "main"
+
+// SvcConfigPort is the config key used for storing the svc port
+const SvcConfigPort = "svc-port"
+
+// SvcConfigPid is the config key used for storing the svc pid
+const SvcConfigPid = "svc-pid"
+
+// TrayAppName is the name we give our systray application
+const TrayAppName = "ActiveState Desktop"
+
+// SvcAppName is the name we give our state-svc application
+const SvcAppName = "State Service"
+
+// StateAppName is the name we give our state cli executable
+const StateAppName = "State Tool"
+
+// ToplevelInstallArchiveDir is the top-level directory for files in an installation archive
+// Cf., https://www.pivotaltracker.com/story/show/177781411
+const ToplevelInstallArchiveDir = "state-install"
+
+// FirstMultiFileStateToolVersion is the State Tool version that introduced multi-file updates
+const FirstMultiFileStateToolVersion = "0.29.0"

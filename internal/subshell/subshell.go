@@ -2,13 +2,17 @@ package subshell
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/thoas/go-funk"
 
+	"github.com/ActiveState/cli/internal/config"
 	"github.com/ActiveState/cli/internal/constants"
+	"github.com/ActiveState/cli/internal/errs"
+	"github.com/ActiveState/cli/internal/fileutils"
 	"github.com/ActiveState/cli/internal/logging"
 	"github.com/ActiveState/cli/internal/osutils"
 	"github.com/ActiveState/cli/internal/output"
@@ -25,7 +29,7 @@ import (
 // under the same directory as this file
 type SubShell interface {
 	// Activate the given subshell
-	Activate(cfg sscommon.Configurable, out output.Outputer) error
+	Activate(proj *project.Project, cfg sscommon.Configurable, out output.Outputer) error
 
 	// Errors returns a channel to receive errors
 	Errors() <-chan error
@@ -46,7 +50,13 @@ type SubShell interface {
 	SetBinary(string)
 
 	// WriteUserEnv writes the given env map to the users environment
-	WriteUserEnv(sscommon.Configurable, map[string]string, sscommon.EnvData, bool) error
+	WriteUserEnv(sscommon.Configurable, map[string]string, sscommon.RcIdentification, bool) error
+
+	// WriteCompletionScript writes the completions script for the current shell
+	WriteCompletionScript(string) error
+
+	// RcFile return the path of the RC file
+	RcFile() (string, error)
 
 	// SetupShellRcFile writes a script or source-able file that updates the environment variables and sets the prompt
 	SetupShellRcFile(string, map[string]string, project.Namespaced) error
@@ -65,23 +75,24 @@ type SubShell interface {
 }
 
 // New returns the subshell relevant to the current process, but does not activate it
-func New() SubShell {
-	binary := os.Getenv("SHELL")
-	if binary == "" {
-		if runtime.GOOS == "windows" {
-			binary = os.Getenv("ComSpec")
-			if binary == "" {
-				binary = "cmd.exe"
-			}
+func New(cfg *config.Instance) SubShell {
+	binary := DetectShellBinary(cfg)
+
+	// try to find the binary on the PATH
+	binaryPath, err := exec.LookPath(binary)
+	if err == nil {
+		// if we found it, resolve all symlinks, for many Linux distributions the SHELL is "sh" but symlinked to a different default shell like bash or zsh
+		resolved, err := fileutils.ResolvePath(binaryPath)
+		if err == nil {
+			binary = resolved
 		} else {
-			binary = "bash"
+			logging.Debug("Failed to resolve path to shell binary %s: %v", binaryPath, err)
 		}
 	}
 
-	logging.Debug("Detected SHELL: %s", binary)
-
 	name := filepath.Base(binary)
 	name = strings.TrimSuffix(name, filepath.Ext(name))
+	logging.Debug("Detected SHELL: %s", name)
 
 	if runtime.GOOS == "windows" {
 		// For some reason Go or MSYS doesn't translate paths with spaces correctly, so we have to strip out the
@@ -102,7 +113,7 @@ func New() SubShell {
 	case "cmd":
 		subs = &cmd.SubShell{}
 	default:
-		logging.Errorf("Unsupported shell: %s, defaulting to OS default.", name)
+		logging.Debug("Unsupported shell: %s, defaulting to OS default.", name)
 		switch runtime.GOOS {
 		case "windows":
 			return &cmd.SubShell{}
@@ -122,4 +133,41 @@ func New() SubShell {
 	subs.SetEnv(osutils.EnvSliceToMap(env))
 
 	return subs
+}
+
+func DetectShellBinary(cfg *config.Instance) (binary string) {
+	configured := cfg.GetString(config.ConfigKeyShell)
+	defer func() {
+		// do not re-write shell binary to config, if the value did not change.
+		if configured == binary {
+			return
+		}
+		// We save and use the detected shell to our config so that we can use it when running code through
+		// a non-interactive shell
+		if err := cfg.Set(config.ConfigKeyShell, binary); err != nil {
+			logging.Error("Could not save shell binary: %v", errs.Join(err, ": "))
+		}
+	}()
+
+	if binary := os.Getenv("SHELL"); binary != "" {
+		return binary
+	}
+
+	if runtime.GOOS == "windows" {
+		binary = os.Getenv("ComSpec")
+		if binary != "" {
+			return binary
+		}
+	}
+
+	fallback := configured
+	if fallback == "" {
+		if runtime.GOOS == "windows" {
+			fallback = "cmd.exe"
+		} else {
+			fallback = "bash"
+		}
+	}
+
+	return fallback
 }

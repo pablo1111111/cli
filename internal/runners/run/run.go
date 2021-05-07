@@ -3,6 +3,7 @@ package run
 import (
 	"strings"
 
+	"github.com/ActiveState/cli/internal/config"
 	"github.com/ActiveState/cli/internal/language"
 	"github.com/ActiveState/cli/internal/locale"
 	"github.com/ActiveState/cli/internal/logging"
@@ -21,7 +22,7 @@ type Run struct {
 	out      output.Outputer
 	proj     *project.Project
 	subshell subshell.SubShell
-	cfg      scriptrun.Configurable
+	cfg      *config.Instance
 }
 
 type primeable interface {
@@ -46,7 +47,7 @@ func (r *Run) Run(name string, args []string) error {
 	return run(r.out, r.subshell, r.proj, r.cfg, name, args)
 }
 
-func run(out output.Outputer, subs subshell.SubShell, proj *project.Project, cfg scriptrun.Configurable, name string, args []string) error {
+func run(out output.Outputer, subs subshell.SubShell, proj *project.Project, cfg *config.Instance, name string, args []string) error {
 	logging.Debug("Execute")
 
 	if proj == nil {
@@ -60,7 +61,7 @@ func run(out output.Outputer, subs subshell.SubShell, proj *project.Project, cfg
 	out.Notice(txtstyle.NewTitle(locale.Tl("run_script_title", "Running Script: [ACTIONABLE]{{.V0}}[/RESET]", name)))
 
 	if authentication.Get().Authenticated() {
-		checker.RunCommitsBehindNotifier(out)
+		checker.RunCommitsBehindNotifier(proj, out)
 	}
 
 	script := proj.ScriptByName(name)
@@ -70,8 +71,6 @@ func run(out output.Outputer, subs subshell.SubShell, proj *project.Project, cfg
 
 	scriptrunner := scriptrun.New(out, subs, proj, cfg)
 	if !script.Standalone() && scriptrunner.NeedsActivation() {
-		out.Notice(output.Heading(locale.Tl("notice", "Notice")))
-		out.Notice(locale.T("info_state_run_activating_state"))
 		if err := scriptrunner.PrepareVirtualEnv(script.Constants()); err != nil {
 			return locale.WrapError(err, "err_script_run_preparevenv", "Could not prepare virtual environment.")
 		}

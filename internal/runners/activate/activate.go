@@ -2,14 +2,19 @@ package activate
 
 import (
 	"fmt"
+	"os/user"
 	"path/filepath"
+	rt "runtime"
+	"strings"
 
 	"github.com/ActiveState/cli/internal/analytics"
+	"github.com/ActiveState/cli/internal/config"
 	"github.com/ActiveState/cli/internal/constants"
 	"github.com/ActiveState/cli/internal/errs"
 	"github.com/ActiveState/cli/internal/globaldefault"
 	"github.com/ActiveState/cli/internal/locale"
 	"github.com/ActiveState/cli/internal/logging"
+	"github.com/ActiveState/cli/internal/osutils"
 	"github.com/ActiveState/cli/internal/output"
 	"github.com/ActiveState/cli/internal/output/txtstyle"
 	"github.com/ActiveState/cli/internal/primer"
@@ -31,7 +36,7 @@ type Activate struct {
 	namespaceSelect  *NamespaceSelect
 	activateCheckout *Checkout
 	out              output.Outputer
-	config           configurable
+	config           *config.Instance
 	proj             *project.Project
 	subshell         subshell.SubShell
 	prompt           prompt.Prompter
@@ -145,7 +150,7 @@ func (r *Activate) run(params *ActivateParams) error {
 
 	// on --replace, replace namespace and commit id in as.yaml
 	if params.ReplaceWith.IsValid() {
-		if err := updateProjectFile(proj, params.ReplaceWith); err != nil {
+		if err := updateProjectFile(proj, params.ReplaceWith, params.Branch); err != nil {
 			return locale.WrapError(err, "err_activate_replace_write", "Could not update the project file with a new namespace.")
 		}
 	}
@@ -172,24 +177,39 @@ func (r *Activate) run(params *ActivateParams) error {
 		r.subshell.SetActivateCommand(params.Command)
 	}
 
-	runtime, err := runtime.NewRuntime(proj.Source().Path(), r.config.CachePath(), proj.CommitUUID(), proj.Owner(), proj.Name(), runbits.NewRuntimeMessageHandler(r.out))
-	if err != nil {
-		return locale.WrapError(err, "err_activate_runtime", "Could not initialize a runtime for this project.")
+	// Determine branch name
+	branch := proj.BranchName()
+	if params.Branch != "" {
+		branch = params.Branch
 	}
 
-	venv := virtualenvironment.New(runtime)
-	venv.OnUseCache(func() { r.out.Notice(locale.T("using_cached_env")) })
-
-	err = venv.Setup(true)
+	rt, err := runtime.New(runtime.NewProjectTarget(proj, r.config.CachePath(), nil))
 	if err != nil {
-		if !authentication.Get().Authenticated() {
-			return locale.WrapError(err, "error_could_not_activate_venv_auth", "Could not activate project. If this is a private project ensure that you are authenticated.")
+		if !runtime.IsNeedsUpdateError(err) {
+			return locale.WrapError(err, "err_activate_runtime", "Could not initialize a runtime for this project.")
 		}
-		return locale.WrapError(err, "err_could_not_activate_venv", "Could not activate project")
+		if err = rt.Update(runbits.DefaultRuntimeEventHandler(r.out)); err != nil {
+			return locale.WrapError(err, "err_update_runtime", "Could not update runtime installation.")
+		}
+		if err != nil {
+			if errs.Matches(err, &model.ErrNoMatchingPlatform{}) {
+				branches, err := model.BranchNamesForProjectFiltered(proj.Owner(), proj.Name(), branch)
+				if err == nil && len(branches) > 1 {
+					err = locale.NewInputError("err_activate_platfrom_alternate_branches", "", branch, strings.Join(branches, "\n - "))
+					return errs.AddTips(err, "Run → `[ACTIONABLE]state branch switch <NAME>[/RESET]` to switch branch")
+				}
+			}
+			if !authentication.Get().Authenticated() {
+				return locale.WrapError(err, "error_could_not_activate_venv_auth", "Could not activate project. If this is a private project ensure that you are authenticated.")
+			}
+			return locale.WrapError(err, "err_could_not_activate_venv", "Could not activate project")
+		}
 	}
+
+	venv := virtualenvironment.New(rt)
 
 	if setDefault {
-		err := globaldefault.SetupDefaultActivation(r.subshell, r.config, runtime, filepath.Dir(proj.Source().Path()))
+		err := globaldefault.SetupDefaultActivation(r.subshell, r.config, rt, filepath.Dir(proj.Source().Path()))
 		if err != nil {
 			return locale.WrapError(err, "err_activate_default", "Could not configure your project as the default.")
 		}
@@ -197,14 +217,14 @@ func (r *Activate) run(params *ActivateParams) error {
 		r.out.Notice(output.Heading(locale.Tl("global_default_heading", "Global Default")))
 		r.out.Notice(locale.Tl("global_default_set", "Successfully configured [NOTICE]{{.V0}}[/RESET] as the global default project.", proj.Namespace().String()))
 
-		globaldefault.WarningForAdministrator(r.out)
+		warningForAdministrator(r.out)
 
 		if alreadyActivated {
 			return nil
 		}
 	}
 
-	updater.PrintUpdateMessage(proj.Source().Path(), r.out)
+	updater.DefaultChecker.PrintUpdateMessage(proj.Source().Path(), r.out)
 
 	if proj.CommitID() == "" {
 		err := locale.NewInputError("err_project_no_commit", "Your project does not have a commit ID, please run `state push` first.", model.ProjectURL(proj.Owner(), proj.Name(), ""))
@@ -224,10 +244,15 @@ func (r *Activate) run(params *ActivateParams) error {
 	return nil
 }
 
-func updateProjectFile(prj *project.Project, names *project.Namespaced) error {
+func updateProjectFile(prj *project.Project, names *project.Namespaced, providedBranch string) error {
+	branch := providedBranch
+	if branch == "" {
+		branch = constants.DefaultBranchName
+	}
+
 	var commitID string
 	if names.CommitID == nil || *names.CommitID == "" {
-		latestID, err := model.LatestCommitID(names.Owner, names.Project)
+		latestID, err := model.BranchCommitID(names.Owner, names.Project, branch)
 		if err != nil {
 			return locale.WrapInputError(err, "err_set_namespace_retrieve_commit", "Could not retrieve the latest commit for the specified project {{.V0}}.", names.String())
 		}
@@ -236,13 +261,14 @@ func updateProjectFile(prj *project.Project, names *project.Namespaced) error {
 		commitID = names.CommitID.String()
 	}
 
-	err := prj.Source().SetNamespace(names.Owner, names.Project)
-	if err != nil {
+	if err := prj.Source().SetNamespace(names.Owner, names.Project); err != nil {
 		return locale.WrapError(err, "err_activate_replace_write_namespace", "Failed to update project namespace.")
 	}
-	err = prj.Source().SetCommit(commitID, prj.IsHeadless())
-	if err != nil {
+	if err := prj.Source().SetCommit(commitID, prj.IsHeadless()); err != nil {
 		return locale.WrapError(err, "err_activate_replace_write_commit", "Failed to update commitID.")
+	}
+	if err := prj.Source().SetBranch(branch); err != nil {
+		return locale.WrapError(err, "err_activate_replace_write_branch", "Failed to update Branch.")
 	}
 
 	return nil
@@ -269,4 +295,29 @@ func (r *Activate) pathToProject(path string) (*project.Project, error) {
 		return nil, locale.WrapError(err, "err_activate_projectpath", "Could not find a valid project path.")
 	}
 	return projectToUse, nil
+}
+
+// warningForAdministrator prints a warning message if default activation is invoked by a Windows Administrator
+// The default activation will only be accessible by the underlying unprivileged user.
+func warningForAdministrator(out output.Outputer) {
+	if rt.GOOS != "windows" {
+		return
+	}
+
+	isAdmin, err := osutils.IsWindowsAdmin()
+	if err != nil {
+		logging.Error("Failed to determine if run as administrator.")
+	}
+	if isAdmin {
+		u, err := user.Current()
+		if err != nil {
+			logging.Error("Failed to determine current user.")
+			return
+		}
+		out.Notice(locale.Tl(
+			"default_admin_activation_warning",
+			"[NOTICE]The default activation is added to the environment of user {{.V0}}.  The project may be inaccessible when run with Administrator privileges or authenticated as a different user.[/RESET]",
+			u.Username,
+		))
+	}
 }
