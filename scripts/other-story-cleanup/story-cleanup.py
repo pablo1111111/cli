@@ -16,7 +16,7 @@ PT_HEADERS_BASE = {'X-TrackerToken':os.getenv('PT_API_TOKEN')}
 PT_PARAMS_BASE = {'date_format':'millis', 'limit':50}
 PT_DAYS_AGED = 190 if 'PT_DAYS_AGED' not in os.environ else int(os.getenv('PT_DAYS_AGED'))
 
-print('primary')
+print('other')
 quit()
 
 if PT_DAYS_AGED < 30:

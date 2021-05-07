@@ -71,7 +71,7 @@ func run(out output.Outputer, subs subshell.SubShell, proj *project.Project, cfg
 
 	scriptrunner := scriptrun.New(out, subs, proj, cfg)
 	if !script.Standalone() && scriptrunner.NeedsActivation() {
-		if err := scriptrunner.PrepareVirtualEnv(script.Constants()); err != nil {
+		if err := scriptrunner.PrepareVirtualEnv(); err != nil {
 			return locale.WrapError(err, "err_script_run_preparevenv", "Could not prepare virtual environment.")
 		}
 	}

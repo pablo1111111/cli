@@ -57,12 +57,15 @@ script_sources:
     language: python3
     strip_ext: true
     locations: [./scripts/story-cleanup/story-cleanup.py]
-    constants:
-      - {name: PT_API_TOKEN,      value: "TOKEN"}
-      - {name: PT_PROJID_PRIMARY, value: $secrets.project.PT_PROJID_PRIMARY}
-      - {name: PT_PROJID_STORAGE, value: $secrets.project.PT_PROJID_STORAGE}
-      - {name: PT_DAYS_AGED,      value: 190} # set this value to control cleanup
+  - name: other-story-cleanup
+    description: "Runs Python script to move old stories from secondary project to storage project"
+    language: python3
+    strip_ext: true
+    locations: [./scripts/other-story-cleanup/story-cleanup.py]
 scripts:
+  - name: tester
+    language: python3
+    value: print("TESTER")
   - name: install-deps
     language: bash
     value: |

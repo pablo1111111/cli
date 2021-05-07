@@ -57,7 +57,7 @@ func (s *ScriptRun) NeedsActivation() bool {
 }
 
 // PrepareVirtualEnv sets up the relevant runtime and prepares the environment.
-func (s *ScriptRun) PrepareVirtualEnv(moreConsts []*project.Constant) error {
+func (s *ScriptRun) PrepareVirtualEnv() error {
 	rt, err := runtime.New(runtime.NewProjectTarget(s.project, s.cfg.CachePath(), nil))
 	if err != nil {
 		if !runtime.IsNeedsUpdateError(err) {
@@ -70,11 +70,6 @@ func (s *ScriptRun) PrepareVirtualEnv(moreConsts []*project.Constant) error {
 	venv := virtualenvironment.New(rt)
 
 	env, err := venv.GetEnv(true, true, filepath.Dir(s.project.Source().Path()))
-	if err != nil {
-		return err
-	}
-
-	env, err = appendConstants(env, moreConsts)
 	if err != nil {
 		return err
 	}
@@ -92,17 +87,6 @@ func (s *ScriptRun) PrepareVirtualEnv(moreConsts []*project.Constant) error {
 	return nil
 }
 
-func appendConstants(envMap map[string]string, constants []*project.Constant) (map[string]string, error) {
-	for _, constant := range constants {
-		var err error
-		envMap[constant.Name()], err = constant.Value()
-		if err != nil {
-			return nil, locale.WrapError(err, "err_venv_constant_val", "Could not retrieve value for constant: `{{.V0}}`.", constant.Name())
-		}
-	}
-	return envMap, nil
-}
-
 // Run executes the script after ensuring the environment is prepared.
 func (s *ScriptRun) Run(script *project.Script, args []string) error {
 	if s.project == nil {
@@ -116,7 +100,7 @@ func (s *ScriptRun) Run(script *project.Script, args []string) error {
 
 	// Activate the state if needed.
 	if !script.Standalone() && s.NeedsActivation() {
-		if err := s.PrepareVirtualEnv(script.Constants()); err != nil {
+		if err := s.PrepareVirtualEnv(); err != nil {
 			return errs.Wrap(err, "Could not prepare virtual environment.")
 		}
 	}
