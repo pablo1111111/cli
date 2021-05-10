@@ -52,20 +52,14 @@ constants:
       # add the GOARCH as infix to BUILD_TARGET_DIR if not amd64
       BUILD_TARGET_DIR=$constants.BUILD_TARGET_PREFIX_DIR/${GOARCH#amd64}
 script_sources:
-  - name: story-cleanup
-    description: "Runs Python script to move old stories from primary project to storage project"
+  - name: hello
+    description: "Hello scripts"
     language: python3
-    strip_ext: true
-    locations: [./scripts/story-cleanup/story-cleanup.py]
-  - name: other-story-cleanup
-    description: "Runs Python script to move old stories from secondary project to storage project"
-    language: python3
-    strip_ext: true
-    locations: [./scripts/other-story-cleanup/story-cleanup.py]
+    locations: [./scripts/hello/*]
 scripts:
   - name: tester
     language: python3
-    value: print("TESTER")
+    value: $scripts.worldx.Path()
   - name: install-deps
     language: bash
     value: |

@@ -1,0 +1,1 @@
+print('$scripts.worldx.Path()')
