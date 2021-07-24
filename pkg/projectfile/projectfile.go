@@ -159,10 +159,53 @@ func MakeLanguagesFromConstrainedEntities(items []ConstrainedEntity) (languages 
 	return languages
 }
 
+type Strategy string
+
+const (
+	Append    Strategy = "append"
+	Prepend   Strategy = "prepend"
+	Overwrite Strategy = "overwrite"
+	Fallback  Strategy = "fallback"
+)
+
+func (s *Strategy) SetByText(v string) error {
+	switch Strategy(v) {
+	case Append:
+		*s = Append
+	case Prepend:
+		*s = Prepend
+	case Overwrite:
+		*s = Overwrite
+	case Fallback:
+		*s = Fallback
+	default:
+		return errors.New("oops")
+	}
+	return nil
+}
+
+func (s Strategy) String() string {
+	return string(s)
+}
+
+func (s *Strategy) UnmarshalYAML(applyPayload func(interface{}) error) error {
+	var payload string
+	if err := applyPayload(&payload); err != nil {
+		return err
+	}
+
+	return s.SetByText(payload)
+}
+
+func (s *Strategy) MarshalYAML() (interface{}, error) {
+	return s.String(), nil
+}
+
 // Constant covers the constant structure, which goes under Project
 type Constant struct {
 	Name        string      `yaml:"name"`
 	Value       string      `yaml:"value"`
+	Strategy    *Strategy   `yaml:"strategy,omitempty"`
 	Conditional Conditional `yaml:"if"`
 	Constraints Constraint  `yaml:"constraints,omitempty"`
 }
@@ -172,6 +215,15 @@ var _ ConstrainedEntity = &Constant{}
 // ID returns the constant name
 func (c *Constant) ID() string {
 	return c.Name
+}
+
+func (c *Constant) ValueWithStrategy(existing string, exists bool) string {
+	if c.Strategy == nil {
+		
+	}
+	switch *c.Strategy {
+	case Append
+	}
 }
 
 // ConstraintsFilter returns the constant constraints
@@ -923,16 +975,16 @@ func FromExactPath(path string) (*Project, error) {
 
 // CreateParams are parameters that we create a custom activestate.yaml file from
 type CreateParams struct {
-	Owner           string
-	Project         string
-	CommitID        *strfmt.UUID
-	BranchName      string
-	Directory       string
-	Content         string
-	Language        string
-	Private         bool
-	path            string
-	ProjectURL      string
+	Owner      string
+	Project    string
+	CommitID   *strfmt.UUID
+	BranchName string
+	Directory  string
+	Content    string
+	Language   string
+	Private    bool
+	path       string
+	ProjectURL string
 }
 
 // TestOnlyCreateWithProjectURL a new activestate.yaml with default content
@@ -1015,10 +1067,10 @@ func createCustom(params *CreateParams, lang language.Language) (*Project, error
 	}
 
 	data := map[string]interface{}{
-		"Project":         params.ProjectURL,
-		"CommitID":        commitID,
-		"Content":         content,
-		"Private":         params.Private,
+		"Project":  params.ProjectURL,
+		"CommitID": commitID,
+		"Content":  content,
+		"Private":  params.Private,
 	}
 
 	tplName := "activestate.yaml.tpl"

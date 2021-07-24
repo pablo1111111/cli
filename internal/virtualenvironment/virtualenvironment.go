@@ -1,6 +1,7 @@
 package virtualenvironment
 
 import (
+	"os"
 	"path/filepath"
 
 	"github.com/google/uuid"
@@ -50,11 +51,12 @@ func (v *VirtualEnvironment) GetEnv(inherit bool, useExecutors bool, projectDir 
 			return envMap, err
 		}
 		for _, constant := range pj.Constants() {
-			var err error
-			envMap[constant.Name()], err = constant.Value()
+			existingVal, ok := os.LookupEnv(constant.Name())
+			val, err := constant.ValueWithStrategy(existingVal, ok)
 			if err != nil {
 				return nil, locale.WrapError(err, "err_venv_constant_val", "Could not retrieve value for constant: `{{.V0}}`.", constant.Name())
 			}
+			envMap[constant.Name()] = val
 		}
 	}
 
