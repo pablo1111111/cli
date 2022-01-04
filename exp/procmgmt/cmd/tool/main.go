@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"time"
@@ -11,10 +12,19 @@ import (
 )
 
 func main() {
-	pm := proccomm.New("name", "id", "")
+	var (
+		id = "default"
+	)
+
+	flag.StringVar(&id, "id", id, "identifier")
+	flag.Parse()
+
+	pm := proccomm.New("name", id, "")
 	addr, err := pm.HTTPAddr()
 	if err != nil {
-		if _, err = exeutils.ExecuteAndForget("../svc/build/svc", nil); err != nil {
+		args := []string{"-id", id}
+
+		if _, err = exeutils.ExecuteAndForget("../svc/build/svc", args); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"path"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/ActiveState/cli/exp/procmgmt/internal/proccomm"
 	"github.com/ActiveState/cli/exp/procmgmt/internal/serve"
@@ -21,6 +23,13 @@ func main() {
 }
 
 func run() error {
+	var (
+		id = "default"
+	)
+
+	flag.StringVar(&id, "id", id, "identifier")
+	flag.Parse()
+
 	srv := serve.New()
 	addr, err := srv.Run()
 	if err != nil {
@@ -48,13 +57,15 @@ func run() error {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}()
+	time.Sleep(time.Millisecond)
 
 	var wg sync.WaitGroup
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		pm := proccomm.New("name", "id", addr)
+
+		pm := proccomm.New("name", id, addr)
 		if err = pm.Listen(done); err != nil {
 			select {
 			case errs <- err:
@@ -66,6 +77,7 @@ func run() error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+
 		srv.Wait() //nolint // add error handling
 	}()
 
