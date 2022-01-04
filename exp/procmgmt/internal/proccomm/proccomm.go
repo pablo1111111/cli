@@ -33,12 +33,7 @@ func (c *ProcComm) Listen(done chan struct{}) error {
 	if err != nil {
 		return fmt.Errorf(emsg, err)
 	}
-	defer func() {
-		l.Close()
-		fmt.Println("debug closing")
-		// this isn't being reached, so unlink of socket doesn't seem to happen
-		// if this doesn't help reuse of the sock file, a more complex scheme is needed
-	}()
+	defer l.Close()
 
 	if err = os.Chmod(c.f, 0700); err != nil {
 		return fmt.Errorf(emsg, err)

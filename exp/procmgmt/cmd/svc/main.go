@@ -56,7 +56,10 @@ func run() error {
 		defer wg.Done()
 		pm := proccomm.New("name", "id", addr)
 		if err = pm.Listen(done); err != nil {
-			errs <- err
+			select {
+			case errs <- err:
+			default:
+			}
 		}
 	}()
 
