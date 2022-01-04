@@ -47,8 +47,13 @@ func (m *ProcMgmt) Listen(done chan struct{}) error {
 		go func() {
 			conn, err := l.Accept()
 			if err != nil {
-				fmt.Println(fmt.Errorf(emsg, err)) // wire this for return
-				return
+				select {
+				case <-done:
+					return
+				default:
+					fmt.Println(fmt.Errorf(emsg, err)) // wire this for return
+					return
+				}
 			}
 			conns <- conn
 		}()

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"sync"
 	"syscall"
 
 	"github.com/ActiveState/cli/exp/procmgmt/internal/procmgmt"
@@ -40,10 +41,21 @@ func run() error {
 		}
 	}()
 
+	var wg sync.WaitGroup
+
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		pm := procmgmt.New()
 		pm.Listen(done) //nolint // add error handling
 	}()
 
-	return srv.Wait()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		srv.Wait() //nolint // add error handling
+	}()
+
+	wg.Wait()
+	return nil
 }
