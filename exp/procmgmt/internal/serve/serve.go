@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 )
 
@@ -13,24 +14,32 @@ type Serve struct {
 	errs chan error
 }
 
-func New(port string) *Serve {
+func New() *Serve {
 	return &Serve{
 		h: &http.Server{
-			Addr:    port,
 			Handler: NewEndpoints(),
 		},
 	}
 }
 
-func (s *Serve) Run() {
+func (s *Serve) Run() (string, error) {
+	emsg := "serve run: %w"
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", fmt.Errorf(emsg, err)
+	}
+
 	if s.errs == nil {
 		s.errs = make(chan error)
 	}
 
 	go func() {
 		defer close(s.errs)
-		s.errs <- s.h.ListenAndServe()
+		s.errs <- s.h.Serve(l)
 	}()
+
+	return l.Addr().String(), nil
 }
 
 func (s *Serve) Wait() error {
@@ -68,19 +77,19 @@ func handleInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 type Client struct {
-	dom string
-	c   *http.Client
+	addr string
+	c    *http.Client
 }
 
-func NewClient(port string) *Client {
+func NewClient(addr string) *Client {
 	return &Client{
-		dom: "http://localhost" + port,
-		c:   &http.Client{},
+		addr: addr,
+		c:    &http.Client{},
 	}
 }
 
 func (c *Client) GetInfo() (string, error) {
-	r, err := c.c.Get(c.dom + handleInfoPath)
+	r, err := c.c.Get("http://" + c.addr + handleInfoPath)
 	if err != nil {
 		return "", err
 	}

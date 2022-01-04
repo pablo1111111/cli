@@ -1,4 +1,4 @@
-package procmgmt
+package proccomm
 
 import (
 	"errors"
@@ -12,22 +12,24 @@ var (
 	msgWidth = 64
 )
 
-type ProcMgmt struct {
-	f  string
-	id string
+type ProcComm struct {
+	f    string
+	id   string
+	addr string
 }
 
-func New( /*path, name, id string*/ ) *ProcMgmt {
-	return &ProcMgmt{
-		f:  "/tmp/exp-procmgmt.sock",
-		id: "tester",
+func New(name, id, addr string) *ProcComm {
+	return &ProcComm{
+		f:    fmt.Sprintf("/tmp/%s-%s.sock", name, id),
+		id:   id,
+		addr: addr,
 	}
 }
 
-func (m *ProcMgmt) Listen(done chan struct{}) error {
+func (c *ProcComm) Listen(done chan struct{}) error {
 	emsg := "listen: %w"
 
-	l, err := net.Listen(network, m.f)
+	l, err := net.Listen(network, c.f)
 	if err != nil {
 		return fmt.Errorf(emsg, err)
 	}
@@ -38,7 +40,7 @@ func (m *ProcMgmt) Listen(done chan struct{}) error {
 		// if this doesn't help reuse of the sock file, a more complex scheme is needed
 	}()
 
-	if err = os.Chmod(m.f, 0700); err != nil {
+	if err = os.Chmod(c.f, 0700); err != nil {
 		return fmt.Errorf(emsg, err)
 	}
 
@@ -66,11 +68,15 @@ func (m *ProcMgmt) Listen(done chan struct{}) error {
 				defer conn.Close()
 
 				buf := make([]byte, msgWidth)
-				conn.Read(buf) //nolint // add error and timeout handling
+				n, _ := conn.Read(buf) //nolint // add error and timeout handling
 
-				fmt.Println(string(buf))
+				requestedID := string(buf[:n])
 
-				_, err = conn.Write(buf)
+				if requestedID != c.id { // not really necessary - socket already ensures this
+					return
+				}
+
+				_, err = conn.Write([]byte(c.addr))
 				if err != nil {
 					fmt.Println(fmt.Errorf(emsg, err)) // wire this for return
 					return
@@ -80,23 +86,24 @@ func (m *ProcMgmt) Listen(done chan struct{}) error {
 	}
 }
 
-func (m *ProcMgmt) OK() (bool, error) {
+func (c *ProcComm) HTTPAddr() (string, error) {
 	emsg := "check ok: %w"
 
-	conn, err := net.Dial(network, m.f)
+	conn, err := net.Dial(network, c.f)
 	if err != nil {
-		return false, fmt.Errorf(emsg, err)
+		return "", fmt.Errorf(emsg, err)
 	}
 	defer conn.Close()
 
-	_, err = conn.Write([]byte(m.id))
+	_, err = conn.Write([]byte(c.id))
 	if err != nil {
-		return false, fmt.Errorf(emsg, err)
+		return "", fmt.Errorf(emsg, err)
 	}
 
 	buf := make([]byte, msgWidth)
-	conn.Read(buf) //nolint // add error and timeout handling
-	fmt.Println(string(buf))
+	n, _ := conn.Read(buf) //nolint // add error and timeout handling
 
-	return string(buf) == m.id, nil
+	addr := string(buf[:n])
+
+	return addr, nil
 }

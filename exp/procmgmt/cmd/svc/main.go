@@ -8,7 +8,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/ActiveState/cli/exp/procmgmt/internal/procmgmt"
+	"github.com/ActiveState/cli/exp/procmgmt/internal/proccomm"
 	"github.com/ActiveState/cli/exp/procmgmt/internal/serve"
 )
 
@@ -21,19 +21,27 @@ func main() {
 }
 
 func run() error {
-	srv := serve.New(":5150")
-	srv.Run()
+	srv := serve.New()
+	addr, err := srv.Run()
+	if err != nil {
+		return err
+	}
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
 	done := make(chan struct{})
+	errs := make(chan error)
 
 	go func() {
 		defer close(done)
 
-		sig := <-sigs
-		fmt.Printf("handling signal: %s\n", sig)
+		select {
+		case sig := <-sigs:
+			fmt.Printf("handling signal: %s\n", sig)
+		case err = <-errs:
+			fmt.Fprintf(os.Stderr, "errored early: %s\n", err)
+		}
 
 		fmt.Println("closing server")
 		if err := srv.Close(); err != nil {
@@ -46,8 +54,10 @@ func run() error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		pm := procmgmt.New()
-		pm.Listen(done) //nolint // add error handling
+		pm := proccomm.New("name", "id", addr)
+		if err = pm.Listen(done); err != nil {
+			errs <- err
+		}
 	}()
 
 	wg.Add(1)
