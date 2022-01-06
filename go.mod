@@ -50,6 +50,7 @@ require (
 	github.com/jarcoal/httpmock v1.0.3
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/kami-zh/go-capturer v0.0.0-20171211120116-e492ea43421d
+	github.com/kardianos/service v1.2.1-0.20211111172041-6fe2824ee824
 	github.com/labstack/echo/v4 v4.2.1
 	github.com/machinebox/graphql v0.2.2
 	github.com/mailru/easyjson v0.7.7 // indirect
