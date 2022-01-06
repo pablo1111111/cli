@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/user"
+	"path/filepath"
 	"time"
 
 	"github.com/kardianos/service"
@@ -23,7 +24,9 @@ type program struct {
 }
 
 func (p *program) Start(s service.Service) error {
-	f, err := os.Create("/tmp/ksvc.log")
+	fpath := filepath.Join(os.TempDir(), "ksvc.log")
+
+	f, err := os.Create(fpath)
 	if err != nil {
 		return err
 	}
