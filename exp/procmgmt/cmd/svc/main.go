@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ActiveState/cli/exp/internal/proccomm"
 	"github.com/ActiveState/cli/exp/internal/serve"
-	"github.com/ActiveState/cli/exp/procmgmt/internal/proccomm"
 )
 
 func main() {
@@ -65,8 +65,8 @@ func run() error {
 	go func() {
 		defer wg.Done()
 
-		pm := proccomm.New("name", id, addr)
-		if err = pm.Listen(done); err != nil {
+		pc := proccomm.New("name", id, addr)
+		if err = pc.Listen(done); err != nil {
 			select {
 			case errs <- err:
 			default:
