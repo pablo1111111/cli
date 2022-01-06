@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/ActiveState/cli/exp/internal/proccomm"
 	"github.com/ActiveState/cli/exp/internal/serve"
-	"github.com/ActiveState/cli/exp/procmgmt/internal/proccomm"
 	"github.com/ActiveState/cli/internal/exeutils"
 )
 
@@ -19,8 +19,8 @@ func main() {
 	flag.StringVar(&id, "id", id, "identifier")
 	flag.Parse()
 
-	pm := proccomm.New("name", id, "")
-	addr, err := pm.HTTPAddr()
+	pc := proccomm.New("name", id, "")
+	addr, err := pc.HTTPAddr()
 	if err != nil {
 		args := []string{"-id", id}
 
@@ -32,7 +32,7 @@ func main() {
 		fmt.Println("starting service")
 		time.Sleep(time.Second)
 
-		addr, err = pm.HTTPAddr()
+		addr, err = pc.HTTPAddr()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
