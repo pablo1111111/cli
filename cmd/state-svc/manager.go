@@ -12,7 +12,6 @@ import (
 	"github.com/ActiveState/cli/internal/osutils"
 	"github.com/ActiveState/cli/internal/rtutils"
 	"github.com/shirou/gopsutil/process"
-	"github.com/spf13/cast"
 
 	"github.com/ActiveState/cli/internal/config"
 	"github.com/ActiveState/cli/internal/constants"
@@ -35,33 +34,29 @@ func NewServiceManager(cfg *config.Instance) *serviceManager {
 
 func (s *serviceManager) Start(args ...string) error {
 	var proc *os.Process
-	err := s.cfg.SetWithLock(constants.SvcConfigPid, func(oldPidI interface{}) (interface{}, error) {
-		oldPid := cast.ToInt(oldPidI)
-		curPid, err := s.CheckPid(oldPid)
-		if err == nil && curPid != nil {
-			return nil, ErrSvcAlreadyRunning
+	err := s.cfg.WithLock(func() error {
+		oldPid := s.cfg.GetInt(constants.SvcConfigPid)
+		if curPid, err := s.CheckPid(oldPid); curPid != nil && err == nil {
+			return ErrSvcAlreadyRunning
 		}
-
-		proc, err = exeutils.ExecuteAndForget(args[0], args[1:])
-		if err != nil {
-			return nil, errs.New("Could not start serviceManager")
+		if proc, err := exeutils.ExecuteAndForget(args[0], args[1:]); proc != nil && err == nil {
+			err = s.cfg.Set(constants.SvcConfigPid, proc.Pid)
+			if err != nil {
+				timeoutErr := rtutils.Timeout(func() error { return proc.Signal(os.Kill) }, time.Second)
+				if timeoutErr != nil {
+					logging.Errorf("Could not cleanup process: %v", timeoutErr)
+					fmt.Printf("Failed to cleanup serviceManager after lock failed, please manually kill the following pid: %d\n", proc.Pid)
+				}
+				return errs.Wrap(err, "Could not store pid")
+			}
+		} else if proc == nil {
+			return errs.New("Could not obtain process information after starting serviceManager")
+		} else if err != nil {
+			return errs.New("Could not start serviceManager")
 		}
-
-		if proc == nil {
-			return nil, errs.New("Could not obtain process information after starting serviceManager")
-		}
-
-		return proc.Pid, nil
 	})
 	if err != nil {
-		if proc != nil {
-			err := rtutils.Timeout(func() error { return proc.Signal(os.Kill) }, time.Second)
-			if err != nil {
-				logging.Errorf("Could not cleanup process: %v", err)
-				fmt.Printf("Failed to cleanup serviceManager after lock failed, please manually kill the following pid: %d\n", proc.Pid)
-			}
-		}
-		return errs.Wrap(err, "Could not store pid")
+		return err
 	}
 
 	logging.Debug("Process started using pid %d", proc.Pid)

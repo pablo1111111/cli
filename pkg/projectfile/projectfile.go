@@ -19,7 +19,6 @@ import (
 	"github.com/gobuffalo/packr"
 	"github.com/google/uuid"
 	"github.com/imdario/mergo"
-	"github.com/spf13/cast"
 	"gopkg.in/yaml.v2"
 
 	"github.com/go-openapi/strfmt"
@@ -1164,7 +1163,7 @@ type ConfigGetter interface {
 	AllKeys() []string
 	GetStringSlice(string) []string
 	Set(string, interface{}) error
-	SetWithLock(string, func(interface{}) (interface{}, error)) error
+	WithLock(func() error) error
 	Close() error
 }
 
@@ -1222,40 +1221,31 @@ func GetCachedProjectNameForPath(config ConfigGetter, projectPath string) string
 }
 
 func addDeprecatedProjectMappings(cfg ConfigGetter) {
-	var unsets []string
-
-	err := cfg.SetWithLock(
-		LocalProjectsConfigKey,
-		func(v interface{}) (interface{}, error) {
-			projects, err := cast.ToStringMapStringSliceE(v)
-			if err != nil && v != nil { // don't report if error due to nil input
-				logging.Errorf("Projects data in config is abnormal (type: %T)", v)
-			}
-
-			keys := funk.FilterString(cfg.AllKeys(), func(v string) bool {
-				return strings.HasPrefix(v, "project_")
-			})
-
-			for _, key := range keys {
-				namespace := strings.TrimPrefix(key, "project_")
-				newPaths := projects[namespace]
-				paths := cfg.GetStringSlice(key)
-				projects[namespace] = funk.UniqString(append(newPaths, paths...))
-				unsets = append(unsets, key)
-			}
-
-			return projects, nil
-		},
-	)
-	if err != nil {
-		logging.Error("Could not update project mapping in config, error: %v", err)
-	}
-	for _, unset := range unsets {
-		if err := cfg.Set(unset, nil); err != nil {
-			logging.Error("Could not clear config entry for key %s, error: %v", unset, err)
+	cfg.WithLock(func() error {
+		keys := funk.FilterString(cfg.AllKeys(), func(v string) bool {
+			return strings.HasPrefix(v, "project_")
+		})
+		projects := cfg.GetStringMapStringSlice(LocalProjectsConfigKey)
+		var unsets []string
+		for _, key := range keys {
+			namespace := strings.TrimPrefix(key, "project_")
+			newPaths := projects[namespace]
+			paths := cfg.GetStringSlice(key)
+			projects[namespace] = funk.UniqString(append(newPaths, paths...))
+			unsets = append(unsets, key)
 		}
-	}
-
+		err := cfg.Set(LocalProjectsConfigKey, projects)
+		if err != nil {
+			logging.Error("Could not update project mapping in config, error: %v", err)
+		}
+		for _, unset := range unsets {
+			err := cfg.Set(unset, nil)
+			if err != nil {
+				logging.Error("Could not clear config entry for key %s, error: %v", unset, err)
+			}
+		}
+		return nil
+	})
 }
 
 // GetProjectPaths returns the paths of all projects associated with the namespace
@@ -1276,52 +1266,46 @@ func GetProjectPaths(cfg ConfigGetter, namespace string) []string {
 // StoreProjectMapping associates the namespace with the project
 // path in the config
 func StoreProjectMapping(cfg ConfigGetter, namespace, projectPath string) {
-	err := cfg.SetWithLock(
-		LocalProjectsConfigKey,
-		func(v interface{}) (interface{}, error) {
-			projects, err := cast.ToStringMapStringSliceE(v)
-			if err != nil && v != nil { // don't report if error due to nil input
-				logging.Errorf("Projects data in config is abnormal (type: %T)", v)
-			}
+	err := cfg.WithLock(func() error {
+		projects := cfg.GetStringMapStringSlice(LocalProjectsConfigKey)
 
-			projectPath, err = fileutils.ResolveUniquePath(projectPath)
-			if err != nil {
-				logging.Errorf("Could not resolve uniqe project path, %v", err)
-				projectPath = filepath.Clean(projectPath)
-			}
+		projectPath, err := fileutils.ResolveUniquePath(projectPath)
+		if err != nil {
+			logging.Errorf("Could not resolve unique project path, %v", err)
+			projectPath = filepath.Clean(projectPath)
+		}
 
-			for name, paths := range projects {
-				for i, path := range paths {
-					path, err = fileutils.ResolveUniquePath(path)
-					if err != nil {
-						logging.Errorf("Could not resolve unique path, :%v", err)
-						path = filepath.Clean(path)
-					}
+		for name, paths := range projects {
+			for i, path := range paths {
+				path, err := fileutils.ResolveUniquePath(path)
+				if err != nil {
+					logging.Errorf("Could not resolve unique path, :%v", err)
+					path = filepath.Clean(path)
+				}
 
-					if path == projectPath {
-						projects[name] = sliceutils.RemoveFromStrings(projects[name], i)
-					}
+				if path == projectPath {
+					projects[name] = sliceutils.RemoveFromStrings(projects[name], i)
+				}
 
-					if len(projects[name]) == 0 {
-						delete(projects, name)
-					}
+				if len(projects[name]) == 0 {
+					delete(projects, name)
 				}
 			}
+		}
 
-			paths := projects[namespace]
-			if paths == nil {
-				paths = make([]string, 0)
-			}
+		paths := projects[namespace]
+		if paths == nil {
+			paths = make([]string, 0)
+		}
 
-			if !funk.Contains(paths, projectPath) {
-				paths = append(paths, projectPath)
-			}
+		if !funk.Contains(paths, projectPath) {
+			paths = append(paths, projectPath)
+		}
 
-			projects[namespace] = paths
+		projects[namespace] = paths
 
-			return projects, nil
-		},
-	)
+		return cfg.Set(LocalProjectsConfigKey, projects)
+	})
 	if err != nil {
 		logging.Error("Could not set project mapping in config, error: %v", err)
 	}
@@ -1330,35 +1314,28 @@ func StoreProjectMapping(cfg ConfigGetter, namespace, projectPath string) {
 // CleanProjectMapping removes projects that no longer exist
 // on a user's filesystem from the projects config entry
 func CleanProjectMapping(cfg ConfigGetter) {
-	err := cfg.SetWithLock(
-		LocalProjectsConfigKey,
-		func(v interface{}) (interface{}, error) {
-			projects, err := cast.ToStringMapStringSliceE(v)
-			if err != nil && v != nil { // don't report if error due to nil input
-				logging.Errorf("Projects data in config is abnormal (type: %T)", v)
+	err := cfg.WithLock(func() error {
+		projects := cfg.GetStringMapStringSlice(LocalProjectsConfigKey)
+		seen := make(map[string]struct{})
+
+		for namespace, paths := range projects {
+			var removals []int
+			for i, path := range paths {
+				if !fileutils.DirExists(path) {
+					removals = append(removals, i)
+				}
 			}
 
-			seen := make(map[string]struct{})
-
-			for namespace, paths := range projects {
-				var removals []int
-				for i, path := range paths {
-					if !fileutils.DirExists(path) {
-						removals = append(removals, i)
-					}
-				}
-
-				projects[namespace] = sliceutils.RemoveFromStrings(projects[namespace], removals...)
-				if _, ok := seen[strings.ToLower(namespace)]; ok || len(projects[namespace]) == 0 {
-					delete(projects, namespace)
-					continue
-				}
-				seen[strings.ToLower(namespace)] = struct{}{}
+			projects[namespace] = sliceutils.RemoveFromStrings(projects[namespace], removals...)
+			if _, ok := seen[strings.ToLower(namespace)]; ok || len(projects[namespace]) == 0 {
+				delete(projects, namespace)
+				continue
 			}
+			seen[strings.ToLower(namespace)] = struct{}{}
+		}
 
-			return projects, nil
-		},
-	)
+		return cfg.Set(LocalProjectsConfigKey, projects)
+	})
 	if err != nil {
 		logging.Debug("Could not clean project mapping in config, error: %v", err)
 	}

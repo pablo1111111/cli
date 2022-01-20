@@ -56,16 +56,16 @@ func (s *service) Stop() error {
 		return errs.New("Can't stop service as it was never started")
 	}
 
-	if err := s.server.Shutdown(); err != nil {
+	err := s.server.Shutdown()
+	if err != nil {
 		return errs.Wrap(err, "Failed to stop server")
 	}
 
-	err := s.cfg.SetWithLock(constants.SvcConfigPid, func(setPidI interface{}) (interface{}, error) {
-		setPid := cast.ToInt(setPidI)
-		if setPid != os.Getpid() {
+	err = s.cfg.WithLock(func() error {
+		if pid := s.cfg.GetInt(constants.SvcConfigPid); pid != os.Getpid() {
 			logging.Warning("PID in configuration file does not match PID of server shutting down")
 		}
-		return "", nil
+		return s.cfg.Set(constants.SvcConfigPid, "")
 	})
 	if err != nil {
 		logging.Warning("Could not unset State Service PID in configuration file")

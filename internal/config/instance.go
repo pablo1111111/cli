@@ -86,7 +86,7 @@ func (i *Instance) Close() error {
 	mutex := sync.Mutex{}
 	mutex.Lock()
 	defer mutex.Unlock()
-	
+
 	if i.closed {
 		return nil
 	}
@@ -97,31 +97,26 @@ func (i *Instance) Close() error {
 	return i.db.Close()
 }
 
-// SetWithLock updates a value at the given key. The valueF argument returns the
-// new value based on the previous one.  If the function returns with an error, the
-// update is cancelled.  The function ensures that no-other process or thread can modify
-// the key between reading of the old value and setting the new value.
-func (i *Instance) SetWithLock(key string, valueF func(oldvalue interface{}) (interface{}, error)) error {
-	return i.thread.Run(func() error {
-		return i.setWithCallback(key, valueF)
-	})
+// WithLock runs the given function within a single thread and ensures that this configuration
+// instance is not modified outside that function.
+func (i *Instance) WithLock(f func() error) error {
+	mutex := sync.Mutex{}
+	mutex.Lock()
+	defer mutex.Unlock()
+	return i.thread.Run(f)
 }
 
-func (i *Instance) setWithCallback(key string, valueF func(oldvalue interface{}) (interface{}, error)) error {
-	v, err := valueF(i.get(key))
-	if err != nil {
-		return errs.Wrap(err, "valueF failed")
-	}
-
+// Set sets a value at the given key.
+func (i *Instance) Set(key string, value interface{}) error {
 	q, err := i.db.Prepare(`INSERT OR REPLACE INTO config(key, value) VALUES(?,?)`)
 	if err != nil {
 		return errs.Wrap(err, "Could not modify settings")
 	}
 	defer q.Close()
 
-	valueMarshaled, err := yaml.Marshal(v)
+	valueMarshaled, err := yaml.Marshal(value)
 	if err != nil {
-		return errs.Wrap(err, "Could not marshal config value: %v", v)
+		return errs.Wrap(err, "Could not marshal config value: %v", value)
 	}
 
 	_, err = q.Exec(key, valueMarshaled)
@@ -130,13 +125,6 @@ func (i *Instance) setWithCallback(key string, valueF func(oldvalue interface{})
 	}
 
 	return nil
-}
-
-// Set sets a value at the given key.
-func (i *Instance) Set(key string, value interface{}) error {
-	return i.SetWithLock(key, func(_ interface{}) (interface{}, error) {
-		return value, nil
-	})
 }
 
 func (i *Instance) IsSet(key string) bool {

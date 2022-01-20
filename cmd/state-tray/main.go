@@ -30,7 +30,6 @@ import (
 	"github.com/getlantern/systray"
 	"github.com/rollbar/rollbar-go"
 	"github.com/shirou/gopsutil/process"
-	"github.com/spf13/cast"
 )
 
 //go:embed icons/icon.ico
@@ -253,16 +252,16 @@ func onExit() {
 		return
 	}
 	defer func() {
-		if err := cfg.Close(); err != nil {
+		err := cfg.Close()
+		if err != nil {
 			logging.Error("Failed to close config after exiting systray: %w", err)
 		}
 	}()
-	err = cfg.SetWithLock(installation.ConfigKeyTrayPid, func(setPidI interface{}) (interface{}, error) {
-		setPid := cast.ToInt(setPidI)
-		if setPid != os.Getpid() {
-			return nil, errs.New("PID in configuration file does not match PID of Systray shutting down")
+	err = cfg.WithLock(func() error {
+		if pid := cfg.GetInt(installation.ConfigKeyTrayPid); pid != os.Getpid() {
+			return errs.New("PID in configuration file does not match PID of Systray shutting down")
 		}
-		return "", nil
+		return cfg.Set(installation.ConfigKeyTrayPid, "")
 	})
 	if err != nil {
 		logging.Error("Failed to unset Systray PID in configuration file: %w", err)
