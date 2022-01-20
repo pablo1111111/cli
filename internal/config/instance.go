@@ -24,11 +24,12 @@ import (
 
 // Instance holds our main config logic
 type Instance struct {
-	appDataDir  string
-	thread      *singlethread.Thread
-	closeThread bool
-	db          *sql.DB
-	closed      bool
+	appDataDir    string
+	thread        *singlethread.Thread
+	threadRunning bool
+	closeThread   bool
+	db            *sql.DB
+	closed        bool
 }
 
 func New() (*Instance, error) {
@@ -102,12 +103,16 @@ func (i *Instance) Close() error {
 func (i *Instance) WithLock(f func() error) error {
 	mutex := sync.Mutex{}
 	mutex.Lock()
-	defer mutex.Unlock()
-	return i.thread.Run(f)
+	mutex.Unlock()
+
+	i.threadRunning = true
+	err := i.thread.Run(f)
+	i.threadRunning = false
+	return err
 }
 
-// Set sets a value at the given key.
-func (i *Instance) Set(key string, value interface{}) error {
+// set sets a value at the given key. (Not thread-safe.)
+func (i *Instance) set(key string, value interface{}) error {
 	q, err := i.db.Prepare(`INSERT OR REPLACE INTO config(key, value) VALUES(?,?)`)
 	if err != nil {
 		return errs.Wrap(err, "Could not modify settings")
@@ -152,6 +157,17 @@ func (i *Instance) get(key string) interface{} {
 	}
 
 	return result
+}
+
+// Set sets a value at the given key with thread-safety in mind.
+func (i *Instance) Set(key string, value interface{}) error {
+	if i.threadRunning {
+		return i.set(key, value)
+	} else {
+		return i.WithLock(func() error {
+			return i.set(key, value)
+		})
+	}
 }
 
 // GetString retrieves a string for a given key

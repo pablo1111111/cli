@@ -62,8 +62,6 @@ type projectURL struct {
 	BranchName string
 }
 
-var projectMapMutex = &sync.Mutex{}
-
 const LocalProjectsConfigKey = "projects"
 
 // VersionInfo is used in cases where we only care about parsing the version field. In all other cases the version is parsed via
