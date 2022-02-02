@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ActiveState/cli/internal/constants"
 	"github.com/ActiveState/cli/internal/errs"
@@ -20,24 +21,25 @@ import (
 )
 
 type Values struct {
-	Version          *string
-	BranchName       *string
-	UserID           *string
-	OSName           *string
-	OSVersion        *string
-	InstallSource    *string
-	MachineID        *string
-	UniqID           *string
-	SessionToken     *string
-	UpdateTag        *string
-	ProjectNameSpace *string
-	OutputType       *string
-	ProjectID        *string
-	Flags            *string
-	Trigger          *string
-	Headless         *string
-	InstanceID       *string
-	CommitID         *string
+	Version          *string `json:"version,omitempty"`
+	BranchName       *string `json:"branchName,omitempty"`
+	UserID           *string `json:"userID,omitempty"`
+	OSName           *string `json:"osName,omitempty"`
+	OSVersion        *string `json:"osVersion,omitempty"`
+	InstallSource    *string `json:"installSource,omitempty"`
+	MachineID        *string `json:"machineID,omitempty"`
+	UniqID           *string `json:"uniqID,omitempty"`
+	SessionToken     *string `json:"sessionToken,omitempty"`
+	UpdateTag        *string `json:"updateTag,omitempty"`
+	ProjectNameSpace *string `json:"projectNameSpace,omitempty"`
+	OutputType       *string `json:"outputType,omitempty"`
+	ProjectID        *string `json:"projectID,omitempty"`
+	Flags            *string `json:"flags,omitempty"`
+	Trigger          *string `json:"trigger,omitempty"`
+	Headless         *string `json:"headless,omitempty"`
+	InstanceID       *string `json:"instanceID,omitempty"`
+	CommitID         *string `json:"commitID,omitempty"`
+	Timestamp        *string `json:"timestamp,omitempty"`
 
 	preProcessor func(*Values) error
 }
@@ -89,6 +91,7 @@ func NewDefaultDimensions(pjNamespace, sessionToken, updateTag string) *Values {
 		p.StrP(""),
 		p.StrP(instanceid.ID()),
 		p.StrP(""),
+		p.StrP(time.Now().String()),
 		nil,
 	}
 }

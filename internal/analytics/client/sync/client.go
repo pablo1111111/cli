@@ -1,12 +1,14 @@
 package sync
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
 	"os"
 	"runtime/debug"
 	"sync"
 
 	"github.com/ActiveState/cli/internal/analytics"
-	"github.com/ActiveState/cli/internal/analytics/client/sync/reporters"
 	anaConsts "github.com/ActiveState/cli/internal/analytics/constants"
 	"github.com/ActiveState/cli/internal/analytics/dimensions"
 	"github.com/ActiveState/cli/internal/condition"
@@ -21,7 +23,6 @@ import (
 	"github.com/ActiveState/cli/internal/updater"
 	"github.com/ActiveState/cli/pkg/platform/authentication"
 	"github.com/ActiveState/cli/pkg/sysinfo"
-	ga "github.com/ActiveState/go-ogle-analytics"
 )
 
 type Reporter interface {
@@ -31,10 +32,11 @@ type Reporter interface {
 
 // Client instances send analytics events to GA and S3 endpoints without delay. It is only supposed to be used inside the `state-svc`.  All other processes should use the DefaultClient.
 type Client struct {
-	gaClient         *ga.Client
 	customDimensions *dimensions.Values
 	eventWaitGroup   *sync.WaitGroup
 	reporters        []Reporter
+	url              string
+	client           *http.Client
 }
 
 var _ analytics.Dispatcher = &Client{}
@@ -43,6 +45,9 @@ var _ analytics.Dispatcher = &Client{}
 func New(cfg *config.Instance, auth *authentication.Auth) *Client {
 	a := &Client{
 		eventWaitGroup: &sync.WaitGroup{},
+		// This is a temporary URL
+		url:    "https://platform.activestate.com/state-analytics",
+		client: &http.Client{},
 	}
 
 	installSource, err := storage.InstallSource()
@@ -98,20 +103,6 @@ func New(cfg *config.Instance, auth *authentication.Auth) *Client {
 
 	a.customDimensions = customDimensions
 
-	// Register reporters
-	if condition.InTest() {
-		logging.Debug("Using test reporter")
-		a.NewReporter(reporters.NewTestReporter())
-	} else {
-		gar, err := reporters.NewGaCLIReporter(deviceID)
-		if err != nil {
-			logging.Critical("Cannot initialize google analytics client: %s", errs.JoinMessage(err))
-		} else {
-			a.NewReporter(gar)
-		}
-		a.NewReporter(reporters.NewPixelReporter())
-	}
-
 	return a
 }
 
@@ -123,18 +114,29 @@ func (a *Client) Wait() {
 	a.eventWaitGroup.Wait()
 }
 
-// Events returns a channel to feed eventData directly to the report loop
-func (a *Client) report(category, action, label string, dimensions *dimensions.Values) {
-	logging.Debug("Reporting event to %d reporters: %s, %s, %s", len(a.reporters), category, action, label)
-
-	for _, reporter := range a.reporters {
-		if err := reporter.Event(category, action, label, dimensions); err != nil {
-			logging.Debug(
-				"Reporter failed: %s, category: %s, action: %s, error: %s",
-				reporter.ID(), category, action, errs.JoinMessage(err),
-			)
-		}
+func (a *Client) report(category, action, label string, d *dimensions.Values) error {
+	e := analytics.Event{category, action, label, d}
+	b, err := json.Marshal(e)
+	if err != nil {
+		return errs.Wrap(err, "Could not marshall analytics event")
 	}
+
+	req, err := http.NewRequest(http.MethodPost, a.url, bytes.NewBuffer(b))
+	if err != nil {
+		return errs.Wrap(err, "Could not create new HTTP request")
+	}
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return errs.Wrap(err, "Could not send analytics request")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return errs.New("Analytics proxy responded with unexected HTTP code: %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 func (a *Client) Event(category string, action string, dims ...*dimensions.Values) {
