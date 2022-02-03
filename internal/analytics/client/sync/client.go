@@ -46,7 +46,7 @@ func New(cfg *config.Instance, auth *authentication.Auth) *Client {
 	a := &Client{
 		eventWaitGroup: &sync.WaitGroup{},
 		// This is a temporary URL
-		url:    "https://platform.activestate.com/state-analytics",
+		url:    "https://platform.activestate.com/state-analytics/events",
 		client: &http.Client{},
 	}
 
@@ -116,7 +116,8 @@ func (a *Client) Wait() {
 
 func (a *Client) report(category, action, label string, d *dimensions.Values) error {
 	e := analytics.Event{category, action, label, d}
-	b, err := json.Marshal(e)
+	evs := analytics.Events{[]analytics.Event{e}}
+	b, err := json.Marshal(evs)
 	if err != nil {
 		return errs.Wrap(err, "Could not marshall analytics event")
 	}

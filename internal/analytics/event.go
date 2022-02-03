@@ -2,7 +2,9 @@ package analytics
 
 import "github.com/ActiveState/cli/internal/analytics/dimensions"
 
-type Events []Event
+type Events struct {
+	Events []Event `json:"events"`
+}
 
 type Event struct {
 	Category   string             `json:"category"`
